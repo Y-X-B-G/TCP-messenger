@@ -1,5 +1,4 @@
-from ast import Tuple
-from asyncio import Semaphore
+from ast import Await, Tuple
 from concurrent.futures import ThreadPoolExecutor, thread
 import enum
 from os import write
@@ -10,7 +9,8 @@ import typing
 import threading
 import datetime
 from click import DateTime
-import bytestring
+from threading import Semaphore
+import asyncio
 
 #Server side code of TCP connecter
 
@@ -22,14 +22,14 @@ import bytestring
 #MAX_CLIENTS is assumed in the code to always be greater then 0
 MAX_CLIENTS: int = 3
 BUFFER_SIZE: int = 1000 #Buffer size of the socket for data
-client_list: list[Tuple[socket.socket, str, sin6_flowinfo]] = [tuple()]*MAX_CLIENTS
-HOST: str = "127.0.0.1"
+client_list: list[tuple[socket.socket, str]] = [tuple()]*MAX_CLIENTS
+HOST: str = 'localhost'
 PORT: int = 1234
 ADDRESS: tuple[str, int] = (HOST, PORT)
 # remaining_threads: Semaphore = Semaphore(MAX_CLIENTS) #Counts the number of availible threads to deal with new connections
 client_number_lock = Semaphore(1)
 client_number = 1
-client_history: list[Tuple[str, DateTime]] = list() #Keeps a history of clients
+client_history: list[tuple[str, DateTime]] = list() #Keeps a history of clients
 
 
 #Following globals have to do with the reader writer problem (Writer's priority) (no preemption) 
@@ -39,24 +39,6 @@ writer_queue: int = 0
 writing: Semaphore = Semaphore(1)
 available_threads: list[bool] = [True]*MAX_CLIENTS
 
-#Logic of the reader writer solution to client list
-"""
-Plz no starvation or deadlock I beg
-
-Writer logic 
-Enter the waiting queue
-Acquire the write semaphore 
-write
-release the write semaphore
-
-Reader logic
-Check if there is a writer waiting/working 
-     If yes keep looping and wait for writer to finish
-     If no acquire the writing semaphore to block new writers and read data
-     return writing lock to indicate that you are done
-"""
-
-
 """
 Handles the TCP connection code
 
@@ -65,22 +47,32 @@ Handles the TCP connection code
 @return - None
 """
 def connection_processor(
-    client_number: tuple[int],
+    client_value: tuple[int],
+    name: str
     ) -> None:
-    index: int = client_number[0]
+    global writer_queue
+    #print("Does it get here")
+    index: int = client_value
     with client_list[index][0] as conn: #accesses the socket object created by .accept()
         while(True):
             data: bytes = conn.recv(BUFFER_SIZE)
             if not data: #Data returns empty bytes object the client has closed the connection
-                with writer_queue_lock:
-                    writer_queue += 1
-                with writing:
-                    available_threads[index] = True
-                with writer_queue_lock:
-                    writer_queue -= 1
+                writer_queue_lock.acquire()
+                writer_queue += 1
+                writer_queue_lock.release()
+
+                writing.acquire()
+                available_threads[index] = True
+                writing.release()
+
+                writer_queue_lock.acquire()
+                writer_queue -= 1
+                writer_queue_lock.release()
+                print(f"Connection terminated with {name}")
                 break
             else:
-                message = data.decode(str = "utf-8") + "ACK"
+                print(f'Message from {name}: {data.decode()}')
+                message = data.decode() + "ACK"
                 conn.sendall(message.encode())
 
 """
@@ -94,20 +86,22 @@ Accepts a connection and passes the processing off to a thread while the main fu
 def server_loop(
     s: socket.socket
     ) -> None:
-    
+    global client_number
     #The goal here is to accept requests and hand them off to other threads for processsing 
     s.listen()
+    print(f"listening for connections on PORT:{PORT}")
     with ThreadPoolExecutor(max_workers = MAX_CLIENTS) as e:
         while (True):
             thread_index: int
             tcp_tuple = s.accept()
+            print("Connection accepted")
             #Assign date and name for records and increase client number
-            with client_number_lock:
-                client_name: str = f"client {client_number}"
-                current_time: datetime.datetime = datetime.datetime.now()
-                client_history.append((client_name, current_time))
-                client_number += 1
-
+            client_number_lock.acquire()
+            client_name: str = f"client {client_number}"
+            current_time: datetime.datetime = datetime.datetime.now()
+            client_history.append((client_name, current_time))
+            client_number += 1
+            client_number_lock.release()
             #The semaphore is returned in the thread that handles the TCP connection and not here
             #remaining_threads.acquire() #Not needed since the threadpool caps the number of threads
 
@@ -115,16 +109,17 @@ def server_loop(
             #Writer's preference since freeing the threads is more important
             while (writer_queue != 0): pass #Move on only if there are no writers waiting
             #writing.acquire() #Prevents writers from modifing the list # I think we can just use with
-            with writing: #prevents writeres from modifing the list 
-                thread_index = available_threads.index(True)
-                #Marks that thread as unavailable this doesn't enter the queue because we already acquired the writing semaphore
-                #and the fact we're here means that no one is waiting to write
-                available_threads[thread_index] = False 
-                client_list[thread_index] = tcp_tuple #Overwrites the data in that thread with the TCP connection data 
-                #Relevant https://www.geeksforgeeks.org/python/args-kwargs-python/
-                e.submit(connection_processor, thread_index) #Starts a thread with the array of the TCP values 
+            writing.acquire() #prevents writeres from modifing the list 
+            thread_index = available_threads.index(True)
+            #Marks that thread as unavailable this doesn't enter the queue because we already acquired the writing semaphore
+            #and the fact we're here means that no one is waiting to write
+            available_threads[thread_index] = False 
+            client_list[thread_index] = tcp_tuple #Overwrites the data in that thread with the TCP connection data 
+            #Relevant https://www.geeksforgeeks.org/python/args-kwargs-python/
+            e.submit(connection_processor, thread_index, client_name) #Starts a thread with the array of the TCP values 
+            writing.release()
 
-def main() -> None:
+async def main() -> None:
     #Checks if we can do ipv6 and ipv4
     if socket.has_dualstack_ipv6():
         with socket.create_server(
@@ -132,12 +127,13 @@ def main() -> None:
             family=socket.AF_INET6, 
             dualstack_ipv6=True
             ) as s:
-            server_loop(s)
+            print("Socket established")
+            await server_loop(s)
     else:
         #just do ivp4
         with socket.create_server(ADDRESS) as s:
-            server_loop(s)
+            await server_loop(s)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
