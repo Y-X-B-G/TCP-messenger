@@ -70,6 +70,8 @@ def connection_processor(
                 writer_queue_lock.release()
                 print(f"Connection terminated with {name}")
                 break
+            elif (data.decode() == "status"):
+                pass
             else:
                 print(f'Message from {name}: {data.decode()}')
                 message = data.decode() + "ACK"
