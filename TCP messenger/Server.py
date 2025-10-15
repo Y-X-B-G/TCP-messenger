@@ -71,6 +71,7 @@ def connection_processor(
                 print(f"Connection terminated with {name}")
                 break
             elif (data.decode() == "status"):
+                #NEED TO IMPLEMENT A WAY TO GET STATUS
                 pass
             else:
                 print(f'Message from {name}: {data.decode()}')
