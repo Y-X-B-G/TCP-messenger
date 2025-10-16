@@ -70,7 +70,7 @@ def connection_processor(
                 writer_queue_lock.release()
                 print(f"Connection terminated with {name}")
                 break
-            elif (data.decode() == "status"):
+            elif (data.decode() == "status"): 
                 #NEED TO IMPLEMENT A WAY TO GET STATUS
                 pass
             else:

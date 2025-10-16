@@ -8,8 +8,8 @@ PORT: int = 1234
 def main() -> None:
     with socket.create_connection((HOST, PORT), source_address=None, all_errors=False) as s:
         while(True):
-            value = input("Enter message or 'BREAK' to disconnect: ")
-            if (value == "BREAK"):
+            value = input("Enter message or 'exit' to disconnect: ")
+            if (value == "exit"):
                 break
             else:
                 s.send(value.encode())
