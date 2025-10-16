@@ -73,6 +73,9 @@ def connection_processor(
             elif (data.decode() == "status"): 
                 #NEED TO IMPLEMENT A WAY TO GET STATUS
                 pass
+            elif (data.decode() = "list"):
+                #implement list 
+                pass
             else:
                 print(f'Message from {name}: {data.decode()}')
                 message = data.decode() + "ACK"
