@@ -1,4 +1,4 @@
-from ast import Await, Tuple
+﻿from ast import Await, Tuple
 from concurrent.futures import ThreadPoolExecutor, thread
 import enum
 from os import write
@@ -56,6 +56,7 @@ def connection_processor(
     #print("Does it get here")
     index: int = client_value
     with client_list[index][0] as conn: #accesses the socket object created by .accept()
+        conn.sendall("What is your name".encode())
         name_data: bytes = conn.recv(BUFFER_SIZE)
         client_history[client_index][0] = name_data.decode()
         name_message = "Got it your name is " + client_history[client_index][0]
@@ -91,25 +92,21 @@ def connection_processor(
                 #its breaking here
                 os.chdir(repofolder)
                 file_name: bytes = conn.recv(BUFFER_SIZE).decode()
-                if (file_name in list_of_directories):
-                    # Reading file and sending data to server
-                    fi = open(file_name, "r")
-                    data_line = fi.read()
-                    '''
-                    if not data_line:
-                        we should send blank data
-                        #figure out how this should work
-                        pass
-                    '''
-                    while data_line:
-                        conn.send(str(data_line).encode())
-                        data_line = fi.read()
-                        # File is closed after data is sent
-                    #Once we get to the end of the line we should send one final empty message to indicate that the message is done and the client can go back to sending normal messages
-                    conn.send(str(data_line).encode())
-                    fi.close()
+                if file_name in list_of_directories:
+                    #Start here 
+                    with open(file_name, 'rb') as f:
+                        while True:
+                            chunk = f.read(BUFFER_SIZE)
+                            #print(chunk)
+                            if not chunk:
+                                break
+                            print(chunk)
+                            conn.sendall(chunk) 
+                        conn.send(b'EOF')  
+                        #End here
                 else:
                     conn.sendall("That file is not in the directory".encode())
+
                 #Set the working directory back to the normal one so next time it doesn't break
                 #I know theres probably better solutions but I don't want to deal with it rn
                 os.chdir(current_dir)
