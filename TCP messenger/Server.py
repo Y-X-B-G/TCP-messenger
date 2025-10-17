@@ -12,6 +12,7 @@ from click import DateTime
 from threading import Semaphore
 import asyncio
 
+
 #Server side code of TCP connecter
 
 #Probably should read these 
@@ -27,9 +28,9 @@ HOST: str = 'localhost'
 PORT: int = 1234
 ADDRESS: tuple[str, int] = (HOST, PORT)
 # remaining_threads: Semaphore = Semaphore(MAX_CLIENTS) #Counts the number of availible threads to deal with new connections
-client_number_lock = Semaphore(1)
-client_number = 1
-client_history: list[tuple[str, DateTime]] = list() #Keeps a history of clients
+client_number_lock: Semaphore = Semaphore(1)
+client_number: int = 1
+client_history: list[list[str, DateTime]] = list() #Keeps a history of clients
 
 
 #Following globals have to do with the reader writer problem (Writer's priority) (no preemption) 
@@ -47,13 +48,18 @@ Handles the TCP connection code
 @return - None
 """
 def connection_processor(
-    client_value: tuple[int],
-    name: str
+    client_value: int,
+    name: str,
+    client_index: int
     ) -> None:
     global writer_queue
     #print("Does it get here")
     index: int = client_value
     with client_list[index][0] as conn: #accesses the socket object created by .accept()
+        name_data: bytes = conn.recv(BUFFER_SIZE)
+        client_history[client_index][0] = name_data.decode()
+        name_message = "Got it your name is " + client_history[client_index][0]
+        conn.sendall(name_message.encode())
         while(True):
             data: bytes = conn.recv(BUFFER_SIZE)
             if not data: #Data returns empty bytes object the client has closed the connection
@@ -68,16 +74,22 @@ def connection_processor(
                 writer_queue_lock.acquire()
                 writer_queue -= 1
                 writer_queue_lock.release()
-                print(f"Connection terminated with {name}")
+                print(f"Connection terminated with {client_history[client_index][0]}")
                 break
             elif (data.decode() == "status"): 
+                reply_history: str
+                for i in client_history:
+                    reply_history = i[0] + f'{ i[1].now():%Y-%m-%d %H:%M:%S%z}' + "\n"
+                print(reply_history)
+                #needs some work
+                conn.send(reply_history.encode())
                 #NEED TO IMPLEMENT A WAY TO GET STATUS
-                pass
-            elif (data.decode() = "list"):
+            elif (data.decode() ==  'list'):
                 #implement list 
                 pass
             else:
-                print(f'Message from {name}: {data.decode()}')
+                print(name_data)
+                print(f'Message from {client_history[client_index][0]}: {data.decode()}')
                 message = data.decode() + "ACK"
                 conn.sendall(message.encode())
 
@@ -105,9 +117,10 @@ def server_loop(
             client_number_lock.acquire()
             client_name: str = f"client {client_number}"
             current_time: datetime.datetime = datetime.datetime.now()
-            client_history.append((client_name, current_time))
+            client_history.append([client_name, current_time])
             client_number += 1
             client_number_lock.release()
+            client_index: int = len(client_history)-1
             #The semaphore is returned in the thread that handles the TCP connection and not here
             #remaining_threads.acquire() #Not needed since the threadpool caps the number of threads
 
@@ -122,7 +135,7 @@ def server_loop(
             available_threads[thread_index] = False 
             client_list[thread_index] = tcp_tuple #Overwrites the data in that thread with the TCP connection data 
             #Relevant https://www.geeksforgeeks.org/python/args-kwargs-python/
-            e.submit(connection_processor, thread_index, client_name) #Starts a thread with the array of the TCP values 
+            e.submit(connection_processor, thread_index, client_name, client_index) #Starts a thread with the array of the TCP values 
             writing.release()
 
 async def main() -> None:
