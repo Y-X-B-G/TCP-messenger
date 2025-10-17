@@ -11,7 +11,7 @@ import datetime
 from click import DateTime
 from threading import Semaphore
 import asyncio
-
+import os
 
 #Server side code of TCP connecter
 
@@ -77,18 +77,43 @@ def connection_processor(
                 print(f"Connection terminated with {client_history[client_index][0]}")
                 break
             elif (data.decode() == "status"): 
-                reply_history: str
+                reply_history: str = ""
                 for i in client_history:
-                    reply_history = i[0] + f'{ i[1].now():%Y-%m-%d %H:%M:%S%z}' + "\n"
+                    reply_history += i[0] + f' {i[1].now():%Y-%m-%d %H:%M:%S%z}' + "\n"
                 print(reply_history)
                 #needs some work
                 conn.send(reply_history.encode())
-                #NEED TO IMPLEMENT A WAY TO GET STATUS
             elif (data.decode() ==  'list'):
-                #implement list 
-                pass
+                current_dir: str = os.getcwd()
+                repofolder: str = current_dir + "\\repo"
+                list_of_directories = os.listdir(repofolder)
+                conn.sendall(",".join(list_of_directories).encode())
+                #its breaking here
+                os.chdir(repofolder)
+                file_name: bytes = conn.recv(BUFFER_SIZE).decode()
+                if (file_name in list_of_directories):
+                    # Reading file and sending data to server
+                    fi = open(file_name, "r")
+                    data_line = fi.read()
+                    '''
+                    if not data_line:
+                        we should send blank data
+                        #figure out how this should work
+                        pass
+                    '''
+                    while data_line:
+                        conn.send(str(data_line).encode())
+                        data_line = fi.read()
+                        # File is closed after data is sent
+                    #Once we get to the end of the line we should send one final empty message to indicate that the message is done and the client can go back to sending normal messages
+                    conn.send(str(data_line).encode())
+                    fi.close()
+                else:
+                    conn.sendall("That file is not in the directory".encode())
+                #Set the working directory back to the normal one so next time it doesn't break
+                #I know theres probably better solutions but I don't want to deal with it rn
+                os.chdir(current_dir)
             else:
-                print(name_data)
                 print(f'Message from {client_history[client_index][0]}: {data.decode()}')
                 message = data.decode() + "ACK"
                 conn.sendall(message.encode())
